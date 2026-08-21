@@ -95,7 +95,7 @@ class LeeLoSwitch(SwitchEntity):
             self._cancel_callback()
             self._cancel_callback = None
         self._running_override = False
-        self._device = LeeLoDevice(ble_device, self._initial_speed, self._initial_timer)
+        self._device = LeeLoDevice(self._hass, ble_device, self._initial_speed, self._initial_timer)
         result = await self._device.connect()
         _LOGGER.info("LeeLo connect result: %s", result)
         self._hass.data.setdefault("membantu_leelo_devices", {})[self._address] = self._device

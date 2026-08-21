@@ -35,6 +35,7 @@ import time
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import establish_connection
+from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,15 +47,14 @@ END_BYTES  = bytes([0xDD, 0x0D, 0x0A])
 
 CMD_HANDSHAKE = 0x01
 CMD_SPEED     = 0x02
-CMD_INTERVAL  = 0x03   # timer interval selection
-CMD_ONOFF     = 0x04   # start/stop
+CMD_INTERVAL  = 0x03
+CMD_ONOFF     = 0x04
 CMD_SYNC      = 0x07
 CMD_ACK       = 0x0A
 
 ONOFF_START = 0x00
 ONOFF_STOP  = 0x01
 
-# Timer interval -> CMD_INTERVAL byte
 INTERVAL_BYTES = {
     "15 min":    0x00,
     "30 min":    0x01,
@@ -63,7 +63,6 @@ INTERVAL_BYTES = {
     "Unlimited": 0x04,
 }
 
-# Timer interval -> minutes (None = unlimited)
 INTERVAL_MINUTES = {
     "15 min":    15,
     "30 min":    30,
@@ -78,8 +77,8 @@ def build_cmd(cmd: int, data: list[int]) -> bytes:
     return bytes(payload) + END_BYTES
 
 
-def _bluetoothctl_remove(address: str) -> None:
-    """Disconnect and remove device from BlueZ cache for a clean connect."""
+def _bluetoothctl_remove_sync(address: str) -> None:
+    """Blocking BlueZ cache clear. Must be called via executor, never directly on the event loop."""
     for action in ("disconnect", "remove"):
         try:
             subprocess.run(
@@ -93,7 +92,14 @@ def _bluetoothctl_remove(address: str) -> None:
 
 
 class LeeLoDevice:
-    def __init__(self, ble_device: BLEDevice, initial_speed: int = 5, initial_timer: str = "Unlimited"):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        ble_device: BLEDevice,
+        initial_speed: int = 5,
+        initial_timer: str = "Unlimited",
+    ):
+        self._hass = hass
         self._ble_device = ble_device
         self._client: BleakClient | None = None
         self._speed = max(1, min(10, initial_speed))
@@ -106,7 +112,10 @@ class LeeLoDevice:
         return self._ble_device.address
 
     async def connect(self) -> bool:
-        _bluetoothctl_remove(self.address)
+        # Run blocking bluetoothctl calls off the event loop
+        await self._hass.async_add_executor_job(
+            _bluetoothctl_remove_sync, self.address
+        )
         await asyncio.sleep(1.0)
         try:
             self._client = await establish_connection(
@@ -116,7 +125,6 @@ class LeeLoDevice:
                 disconnected_callback=self._on_disconnect,
             )
             _LOGGER.info("Connected to LeeLo %s", self.address)
-            # Verify service discovery completed — write char must exist
             char = self._client.services.get_characteristic(CHAR_WRITE_UUID)
             if char is None:
                 _LOGGER.warning("Write characteristic not found — incomplete discovery, disconnecting")
@@ -149,11 +157,9 @@ class LeeLoDevice:
 
     def _on_indicate(self, sender: int, data: bytearray) -> None:
         _LOGGER.debug("Indicate: %s", data.hex())
-        # Parse CMD 0x04 on/off state: AA 04 01 xx
         i = 0
         while i < len(data) - 3:
             if data[i] == 0xAA and data[i+1] == 0x04 and data[i+2] == 0x01:
-                # 0x00 = started, 0x01 = stopped
                 self._running = (data[i+3] == 0x00)
                 break
             i += 1
@@ -172,7 +178,6 @@ class LeeLoDevice:
         return True
 
     async def start(self) -> None:
-        """Start swinging: set interval + speed, then START."""
         interval_byte = INTERVAL_BYTES.get(self._timer, 0x04)
         await self._write(CMD_INTERVAL, [interval_byte])
         await asyncio.sleep(0.1)
@@ -184,7 +189,6 @@ class LeeLoDevice:
             self._start_time = time.monotonic()
 
     async def stop(self) -> None:
-        """Stop swinging."""
         ok = await self._write(CMD_ONOFF, [ONOFF_STOP])
         if ok:
             self._running = False
@@ -197,23 +201,17 @@ class LeeLoDevice:
         self._timer = timer
 
     async def apply_speed(self, speed: int) -> None:
-        """Write speed to device immediately (live change)."""
         self._speed = max(1, min(10, speed))
         await self._write(CMD_SPEED, [self._speed])
 
     async def apply_timer(self, timer: str) -> None:
-        """Write interval to device immediately (live change)."""
         self._timer = timer
         interval_byte = INTERVAL_BYTES.get(timer, 0x04)
         await self._write(CMD_INTERVAL, [interval_byte])
-        # Reset countdown when interval changes while running
         if self._running:
             self._start_time = time.monotonic()
 
     def remaining_seconds(self) -> int | None:
-        """Return remaining seconds, or None if unlimited/not running.
-        Auto-clears running state when countdown reaches zero (timer expired).
-        """
         if not self._running or self._start_time is None:
             return None
         minutes = INTERVAL_MINUTES.get(self._timer)
@@ -222,7 +220,6 @@ class LeeLoDevice:
         elapsed = time.monotonic() - self._start_time
         remaining = int(minutes * 60 - elapsed)
         if remaining <= 0:
-            # Timer expired — device has auto-stopped
             self._running = False
             self._start_time = None
             return 0
