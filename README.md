@@ -1,7 +1,8 @@
 # Membantu LeeLo — Home Assistant Integration
 
 <p align="center">
-  <img src="custom_components/membantu_leelo/brand/logo.png" alt="Membantu LeeLo" width="420">
+  <img src="https://raw.githubusercontent.com/johnfromul/membantu_leelo/main/custom_components/membantu_leelo/brand/logo.png"
+     alt="Membantu LeeLo" width="420">
 </p>
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
