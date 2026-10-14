@@ -8,7 +8,7 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/release/johnfromul/membantu_leelo.svg)](https://github.com/johnfromul/membantu_leelo/releases)
 ![HA](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-green)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/johnfromul/membantu_leelo/blob/main/LICENSE)
 
 A custom Home Assistant integration for the **Membantu LeeLo01 / LeeLo02** baby swing, controlled locally over Bluetooth Low Energy (BLE).
 
